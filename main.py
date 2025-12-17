@@ -32,7 +32,7 @@ from db import (
 
 load_dotenv()
 
-# Включим логирование
+# Логирование
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -210,7 +210,7 @@ async def receive_tags(
         )
         return ConversationHandler.END
 
-    # ✅ Передаём original_name!
+    # Передаём original_name!
     file_id = add_file(
         user_id, file_path, tags, original_name, db_path=DB_PATH
     )
