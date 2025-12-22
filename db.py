@@ -4,7 +4,10 @@
 """
 
 import sqlite3
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def init_db(db_path: str = "lecture_lens.db") -> None:
@@ -74,7 +77,6 @@ def add_user(
 
     Raises:
         ValueError: Если входные данные некорректны.
-        sqlite3.Error: Если произошла ошибка при работе с БД.
     """
     if not isinstance(user_id, int) or user_id <= 0:
         raise ValueError("user_id должен быть положительным целым числом.")
@@ -91,7 +93,7 @@ def add_user(
         conn.commit()
         return True
     except sqlite3.Error as e:
-        print(f"Ошибка при добавлении пользователя: {e}")
+        logger.error("Ошибка при добавлении пользователя: %s", e)
         return False
     finally:
         if conn:
@@ -124,7 +126,6 @@ def add_file(
 
     Raises:
         ValueError: Если входные данные некорректны.
-        sqlite3.Error: При ошибках работы с базой данных.
     """
     if not isinstance(user_id, int) or user_id <= 0:
         raise ValueError("user_id должен быть положительным целым числом.")
@@ -155,7 +156,7 @@ def add_file(
         conn.commit()
         return cursor.lastrowid
     except sqlite3.Error as e:
-        print(f"Ошибка при добавлении файла: {e}")
+        logger.error("Ошибка при добавлении файла: %s", e)
         return None
     finally:
         if conn:
@@ -177,11 +178,11 @@ def search_files(query: str, db_path: str = "lecture_lens.db") -> list[dict]:
             - 'file_path': str
             - 'tags': str
             - 'original_name': str
+            - 'author_name': str
             - 'rating': float
 
     Raises:
         ValueError: Если query пустой.
-        sqlite3.Error: При ошибках работы с БД.
     """
     if not isinstance(query, str) or not query.strip():
         raise ValueError("Запрос для поиска не может быть пустым.")
@@ -198,7 +199,7 @@ def search_files(query: str, db_path: str = "lecture_lens.db") -> list[dict]:
         )
         rows = cursor.fetchall()
     except sqlite3.Error as e:
-        print(f"Ошибка при поиске файлов: {e}")
+        logger.error("Ошибка при поиске файлов: %s", e)
         return []
     finally:
         if conn:
@@ -321,7 +322,6 @@ def rate_file(
 
     Raises:
         ValueError: Если входные данные некорректны.
-        sqlite3.Error: При ошибках работы с БД.
     """
     if not isinstance(file_id, int) or file_id <= 0:
         raise ValueError("file_id должен быть положительным целым числом.")
@@ -350,7 +350,7 @@ def rate_file(
         conn.commit()
         return True
     except sqlite3.Error as e:
-        print(f"Ошибка при оценке файла: {e}")
+        logger.error("Ошибка при оценке файла: %s", e)
         return False
     finally:
         if conn:
@@ -370,7 +370,6 @@ def get_file_rating(file_id: int, db_path: str = "lecture_lens.db") -> float:
 
     Raises:
         ValueError: Если file_id некорректен.
-        sqlite3.Error: При ошибках работы с БД.
     """
     if not isinstance(file_id, int) or file_id <= 0:
         raise ValueError("file_id должен быть положительным целым числом.")
@@ -385,7 +384,7 @@ def get_file_rating(file_id: int, db_path: str = "lecture_lens.db") -> float:
         avg = cursor.fetchone()[0]
         return float(avg) if avg is not None else 0.0
     except sqlite3.Error as e:
-        print(f"Ошибка при получении рейтинга: {e}")
+        logger.error("Ошибка при получении рейтинга: %s", e)
         return 0.0
     finally:
         if conn:

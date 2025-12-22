@@ -1,6 +1,6 @@
 """
 Telegram-бот LectureLens Bot: обмен учебными материалами.
-Все действия — через кнопки (без команд /).
+Все действия — через кнопки.
 """
 
 import logging
@@ -38,6 +38,8 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+logger = logging.getLogger(__name__)
+
 # Состояния для ConversationHandler
 AWAITING_NAME = 0
 AWAITING_FILE = 1
@@ -46,9 +48,9 @@ AWAITING_SEARCH_QUERY = 3
 AWAITING_RATING_INPUT = 4
 AWAITING_FILE_ID_FOR_DOWNLOAD = 5
 
-# Путь к БД и хранилищу
-DB_PATH = "lecture_lens.db"
-STORAGE_DIR = "storage"
+# Путь к БД и хранилищу через переменные окружения
+DB_PATH = os.getenv("DB_PATH", "lecture_lens.db")
+STORAGE_DIR = os.getenv("STORAGE_DIR", "storage")
 
 # Главное меню
 MAIN_MENU = [
@@ -72,8 +74,16 @@ MAIN_MARKUP = ReplyKeyboardMarkup(
 
 def clean_filename(filename: str) -> str:
     """
-    Очищает имя файла от потенциально опасных или недопустимых символов.
-    Оставляет буквы, цифры, пробелы, точки, подчёркивания, дефисы.
+    Очищает имя файла от недопустимых символов.
+    Оставляет только буквы, цифры, пробелы, точки, подчёркивания и дефисы.
+    Также ограничивает длину имени до 100 символов.
+
+    Args:
+        filename (str): Исходное имя файла, возможно содержащее недопустимые символы.
+
+    Returns:
+        str: Очищенное и безопасное имя файла. Если результат пустой,
+             возвращается 'unnamed_file'.
     """
     cleaned = re.sub(r"[^\w\s\.\-]", "", filename)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
@@ -84,7 +94,19 @@ def clean_filename(filename: str) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Приветствие и главное меню."""
+    """
+    Отправляет приветственное сообщение и отображает главное меню пользователю.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние ConversationHandler.END,
+             означающее завершение любого активного диалога.
+    """
+    user = update.effective_user
+    logging.info("Пользователь %s начал диалог", user.full_name)
     await update.message.reply_text(
         "Привет! 👋 Я — LectureLens Bot.\n"
         "Помогаю делиться лекциями и конспектами.\n"
@@ -97,7 +119,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def ask_for_name(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Запрос имени после нажатия кнопки."""
+    """
+    Запрашивает у пользователя его имя после нажатия кнопки 'Указать имя'.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние AWAITING_NAME, ожидая ввода имени.
+    """
     await update.message.reply_text(
         "Пожалуйста, введите ваше имя или никнейм:"
     )
@@ -107,7 +138,18 @@ async def ask_for_name(
 async def receive_name(
         update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Получение и сохранение имени."""
+    """
+    Обрабатывает введённое пользователем имя: проверяет его корректность
+    и сохраняет в базу данных.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние ConversationHandler.END,
+             возвращая пользователя в главное меню.
+    """
     text = update.message.text.strip()
     if text in MAIN_MENU_BUTTONS:
         await update.message.reply_text("Сначала завершите ввод имени.")
@@ -135,7 +177,16 @@ async def receive_name(
 async def ask_for_file(
         update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Запрос файла после нажатия кнопки 'Загрузить файл'."""
+    """
+    Запрашивает у пользователя отправку файла для загрузки.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние AWAITING_FILE, ожидая отправки документа.
+    """
     await update.message.reply_text(
         "Отправьте файл (PDF, DOC, TXT и т.д.):"
     )
@@ -145,7 +196,18 @@ async def ask_for_file(
 async def receive_file(
         update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Получение файла и запрос тегов."""
+    """
+    Принимает загруженный пользователем файл, проверяет его формат,
+    сохраняет на диск и запрашивает теги для индексации.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние AWAITING_TAGS, если файл принят;
+             иначе остаётся в AWAITING_FILE для повторной попытки.
+    """
     if not update.message.document:
         await update.message.reply_text(
             "Пожалуйста, отправьте именно файл (не фото/текст)."
@@ -168,8 +230,24 @@ async def receive_file(
     safe_filename = f"{update.effective_user.id}_{clean_name}_{timestamp}{ext}"
     file_path = os.path.join(STORAGE_DIR, safe_filename)
 
-    file = await document.get_file()
-    await file.download_to_drive(file_path)
+    try:
+        file = await document.get_file()
+        await file.download_to_drive(file_path)
+    except (PermissionError, OSError) as e:
+        # Ошибки файловой системы
+        logger.error(f"Ошибка при сохранении файла {file_path}: {e}")
+        await update.message.reply_text(
+            "Не удалось сохранить файл: возможно, нет праав на запись или закончилось место на диске. "
+            "Попробуйте позже."
+        )
+        return AWAITING_FILE
+    except Exception as e:
+        # Любые другие непредвиденные ошибки (например, сетевые при get_file)
+        logger.exception(f"Неожиданная ошибка при обработке файла: {e}")
+        await update.message.reply_text(
+            "Произошла непредвиденная ошибка. Пожалуйста, попробуйте отправить файл ещё раз."
+        )
+        return AWAITING_FILE
 
     # Сохраняем всё необходимое в контексте
     context.user_data["uploading_file_path"] = file_path
@@ -186,7 +264,17 @@ async def receive_file(
 async def receive_tags(
         update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Получение тегов и сохранение в БД."""
+    """
+    Принимает теги от пользователя и сохраняет информацию о файле в базу данных.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние ConversationHandler.END,
+             возвращая пользователя в главное меню.
+    """
     tags = update.message.text.strip()
     if tags in MAIN_MENU_BUTTONS:
         await update.message.reply_text(
@@ -240,7 +328,16 @@ async def receive_tags(
 async def ask_for_search(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Запрос поискового запроса."""
+    """
+    Запрашивает у пользователя поисковый запрос для поиска файлов по тегам.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние AWAITING_SEARCH_QUERY, ожидая ввода запроса.
+    """
     await update.message.reply_text(
         "Введите ключевые слова для поиска "
         "(например: матан лекция или матан, лекция):"
@@ -251,7 +348,17 @@ async def ask_for_search(
 async def receive_search_query(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Обработка поискового запроса и вывод результатов."""
+    """
+    Выполняет поиск файлов по заданным ключевым словам и отправляет результаты.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние ConversationHandler.END,
+             возвращая пользователя в главное меню.
+    """
     query = update.message.text.strip()
     if query in MAIN_MENU_BUTTONS:
         await update.message.reply_text(
@@ -288,7 +395,16 @@ async def receive_search_query(
 async def ask_for_rating(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Запрос данных для оценки."""
+    """
+    Запрашивает у пользователя ID файла и оценку (от 1 до 5).
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние AWAITING_RATING_INPUT, ожидая ввода данных об оценке.
+    """
     await update.message.reply_text(
         "Введите ID файла и вашу оценку от 1 до 5 через пробел.\n"
         "Пример: 3 5"
@@ -299,7 +415,18 @@ async def ask_for_rating(
 async def receive_rating_input(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Обработка ввода оценки."""
+    """
+    Обрабатывает ввод пользователя для оценки файла: разбирает ID и оценку,
+    проверяет корректность и сохраняет в базу данных.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние ConversationHandler.END,
+             возвращая пользователя в главное меню.
+    """
     text = update.message.text.strip()
 
     if text in MAIN_MENU_BUTTONS:
@@ -345,7 +472,16 @@ async def receive_rating_input(
 async def ask_for_download(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Запрос ID файла для скачивания."""
+    """
+    Запрашивает у пользователя ID файла, который он хочет скачать.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние AWAITING_FILE_ID_FOR_DOWNLOAD, ожидая ввода ID.
+    """
     await update.message.reply_text(
         "Введите ID файла, который хотите скачать "
         "(указан в результатах поиска):"
@@ -356,7 +492,17 @@ async def ask_for_download(
 async def receive_file_id_for_download(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Отправка файла пользователю."""
+    """
+    Обрабатывает введённый ID файла, находит его на диске и отправляет пользователю.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        int: Состояние ConversationHandler.END,
+             возвращая пользователя в главное меню.
+    """
     text = update.message.text.strip()
 
     if text in MAIN_MENU_BUTTONS:
@@ -396,10 +542,20 @@ async def receive_file_id_for_download(
 async def show_profile(
         update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Показывает профиль пользователя: имя и его файлы."""
+    """
+    Отображает профиль пользователя: его имя и список загруженных им файлов.
+
+    Args:
+        update (Update): Объект, содержащий информацию о входящем сообщении.
+        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения обработчика.
+
+    Returns:
+        None
+    """
     user_id = update.effective_user.id
 
     # Получаем имя
+    conn = None
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
@@ -408,7 +564,7 @@ async def show_profile(
     except sqlite3.Error:
         user_row = None
     finally:
-        if "conn" in locals() and conn:
+        if conn:
             conn.close()
 
     if not user_row:
@@ -421,7 +577,7 @@ async def show_profile(
     name = user_row[0]
     files = get_user_files(user_id, db_path=DB_PATH)
 
-    response = f"👤 **Ваш профиль**\nИмя: {name}\n\n"
+    response = f"👤 Ваш профиль\nИмя: {name}\n\n"
     if not files:
         response += "📂 Вы пока ничего не загрузили."
     else:
@@ -435,12 +591,19 @@ async def show_profile(
             )
 
     await update.message.reply_text(
-        response, reply_markup=MAIN_MARKUP, parse_mode="Markdown"
+        response, parse_mode=None
     )
 
 
 def main() -> None:
-    """Запуск бота."""
+    """
+    Основная функция запуска бота.
+    Инициализирует базу данных, создаёт директорию для файлов,
+    настраивает обработчики и запускает polling.
+
+    Raises:
+        ValueError: Если переменная окружения TELEGRAM_BOT_TOKEN не задана.
+    """
     os.makedirs(STORAGE_DIR, exist_ok=True)
     init_db(DB_PATH)
 
