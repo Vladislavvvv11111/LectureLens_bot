@@ -58,7 +58,7 @@ def make_mock_update():
     return _make_mock_update
 
 
-# === Тесты ===
+# === Позитивные тесты ===
 
 
 def test_clean_filename():
@@ -97,7 +97,9 @@ async def test_receive_search_query_success(
         make_mock_update, mock_context, test_db
 ):
     add_user(101, "Автор", DB_PATH)
-    add_file(101, "x", "матан", "lec.pdf", DB_PATH)
+    add_file(
+        101, "x", "матан", "lec.pdf", DB_PATH
+    )
     mock_update = make_mock_update(text="матан")
     await receive_search_query(mock_update, mock_context)
     text = mock_update.message.reply_text.call_args[0][0]
@@ -109,7 +111,9 @@ async def test_receive_rating_input_success(
         make_mock_update, mock_context, test_db
 ):
     add_user(200, "X", DB_PATH)
-    fid = add_file(200, "x", "x", "x.pdf", DB_PATH)
+    fid = add_file(
+        200, "x", "x", "x.pdf", DB_PATH
+    )
     mock_update = make_mock_update(user_id=200, text=f"{fid} 5")
     await receive_rating_input(mock_update, mock_context)
     assert "оценён на 5" in mock_update.message.reply_text.call_args[0][0]
@@ -120,7 +124,9 @@ async def test_receive_file_id_for_download_success(
     make_mock_update, mock_context, test_db
 ):
     add_user(300, "X", DB_PATH)
-    fid = add_file(300, "storage/test.txt", "x", "test.txt", DB_PATH)
+    fid = add_file(
+        300, "storage/test.txt", "x", "test.txt", DB_PATH
+    )
     os.makedirs(STORAGE_DIR, exist_ok=True)
     with open(os.path.join(STORAGE_DIR, "test.txt"), "w") as f:
         f.write("ok")
@@ -130,10 +136,111 @@ async def test_receive_file_id_for_download_success(
 
 
 @pytest.mark.asyncio
-async def test_show_profile_success(make_mock_update, mock_context, test_db):
+async def test_show_profile_success(
+        make_mock_update, mock_context, test_db
+):
     add_user(400, "Профиль", DB_PATH)
     add_file(400, "x", "x", "p.pdf", DB_PATH)
     mock_update = make_mock_update(user_id=400)
     await show_profile(mock_update, mock_context)
     text = mock_update.message.reply_text.call_args[0][0]
     assert "Профиль" in text
+
+
+# === Негативные тесты ===
+
+
+@pytest.mark.asyncio
+async def test_receive_name_empty(
+        make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на пустое имя."""
+    mock_update = make_mock_update(text="")
+    await receive_name(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Имя не может быть пустым" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_rating_input_invalid_format(
+    make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на неверный формат оценки."""
+    mock_update = make_mock_update(text="только_одно_слово")
+    await receive_rating_input(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Неверный формат" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_rating_input_invalid_rating(
+    make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на оценку вне диапазона 1-5."""
+    mock_update = make_mock_update(text="1 6")  # оценка 6 — недопустима
+    await receive_rating_input(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Неверный формат" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_search_query_empty(
+    make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на пустой поисковый запрос."""
+    mock_update = make_mock_update(text="")
+    await receive_search_query(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Запрос не может быть пустым" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_file_id_for_download_invalid_id(
+    make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на неверный ID файла (несуществующий)."""
+    mock_update = make_mock_update(text="999999")  # такого ID нет
+    await receive_file_id_for_download(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Файл не найден" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_file_id_for_download_non_integer(
+    make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на нечисловой ID."""
+    mock_update = make_mock_update(text="не_число")
+    await receive_file_id_for_download(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Неверный ID" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_tags_empty(
+        make_mock_update, mock_context, test_db
+):
+    """Проверка реакции на пустые теги."""
+    add_user(12345, "Тест", DB_PATH)
+    mock_context.user_data.update(
+        {
+            "uploading_file_path": "x",
+            "uploading_original_name": "x.pdf",
+            "uploader_user_id": 12345,
+        }
+    )
+    mock_update = make_mock_update(text="")
+    await receive_tags(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Теги не могут быть пустыми" in call_args
+
+
+@pytest.mark.asyncio
+async def test_receive_name_button_pressed_instead_of_text(
+    make_mock_update, mock_context, test_db
+):
+    """Проверка, что при нажатии кнопки вместо ввода имени — запрос повторяется."""
+    mock_update = make_mock_update(text="📤 Загрузить файл")  # это кнопка
+    await receive_name(mock_update, mock_context)
+    call_args = mock_update.message.reply_text.call_args[0][0]
+    assert "Сначала завершите ввод имени" in call_args
